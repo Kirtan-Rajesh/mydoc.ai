@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($tools = 'python','py','docker','node','npm','flutter','gcloud','git'; foreach \\($t in $tools\\) { $c = Get-Command $t -ErrorAction SilentlyContinue; if \\($c\\) { Write-Output \"$t : $\\($c.Source\\)\" } else { Write-Output \"$t : NOT FOUND\" } })"
+    ]
+  }
+}

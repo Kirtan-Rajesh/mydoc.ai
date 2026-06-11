@@ -1,0 +1,41 @@
+name: Flutter Android build
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: API base URL baked into the build
+        default: https://api.mydoc.ai
+  push:
+    branches: [main]
+    paths: ["frontend-mobile/**"]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend-mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Platform folders are not committed; generate them.
+      - run: flutter create . --org ai.mydoc --project-name mydoc_mobile --platforms android
+
+      - run: flutter pub get
+
+      - run: flutter analyze --no-fatal-infos
+
+      - run: >
+          flutter build apk --release
+          --dart-define=API_BASE_URL=${{ github.event.inputs.api_base_url || 'https://api.mydoc.ai' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mydoc-release-apk
+          path: frontend-mobile/build/app/outputs/flutter-apk/app-release.apk

@@ -1,0 +1,43 @@
+# Local development stack: Postgres + backend.
+# (For the absolute simplest dev loop you don't even need this —
+#  `uvicorn app.main:app --reload` in backend/ runs on SQLite.)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mydoc
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydoc
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mydoc"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://mydoc:password@postgres:5432/mydoc
+      STORAGE_BACKEND: local
+      UPLOAD_DIR: /data/uploads
+      SMS_PROVIDER: console
+      LLM_PROVIDER: auto
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - upload_data:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  upload_data:

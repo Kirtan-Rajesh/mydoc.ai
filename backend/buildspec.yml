@@ -1,0 +1,21 @@
+# CodeBuild: build the backend image and push to ECR.
+# Used because no local Docker is needed — `aws codebuild start-build` does it all.
+version: 0.2
+
+env:
+  variables:
+    ECR_REPO: mydoc-api
+    AWS_REGION: ap-south-1
+
+phases:
+  pre_build:
+    commands:
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - REPO_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+  build:
+    commands:
+      - docker build -t $REPO_URI:latest backend
+  post_build:
+    commands:
+      - docker push $REPO_URI:latest

@@ -1,0 +1,44 @@
+name: Deploy backend to AWS App Runner
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["backend/**"]
+
+env:
+  AWS_REGION: ap-south-1
+  BUILD_PROJECT: mydoc-api-build
+
+jobs:
+  deploy:
+    # Requires repo variable DEPLOY_ENABLED=true and secrets:
+    # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (user with S3 put on the build
+    # bucket + codebuild:StartBuild). App Runner auto-deploys on image push.
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload source and trigger CodeBuild
+        run: |
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          zip -qr src.zip backend
+          aws s3 cp src.zip "s3://mydoc-build-$ACCT/src.zip"
+          BUILD_ID=$(aws codebuild start-build --project-name "$BUILD_PROJECT" \
+            --query build.id --output text)
+          echo "Started $BUILD_ID"
+          while true; do
+            STATUS=$(aws codebuild batch-get-builds --ids "$BUILD_ID" \
+              --query 'builds[0].buildStatus' --output text)
+            echo "build: $STATUS"
+            [ "$STATUS" = "IN_PROGRESS" ] || break
+            sleep 20
+          done
+          [ "$STATUS" = "SUCCEEDED" ]
