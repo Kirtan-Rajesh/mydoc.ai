@@ -103,8 +103,16 @@ class GCSStorage(Storage):
 class S3Storage(Storage):
     def __init__(self) -> None:
         import boto3  # lazy: optional dependency
+        from botocore.config import Config
 
-        self.client = boto3.client("s3", region_name=settings.AWS_REGION or None)
+        # S3-compatible providers (Supabase/R2/MinIO) need an explicit
+        # endpoint and path-style addressing.
+        self.client = boto3.client(
+            "s3",
+            region_name=settings.AWS_REGION or None,
+            endpoint_url=settings.S3_ENDPOINT_URL or None,
+            config=Config(s3={"addressing_style": "path"}) if settings.S3_ENDPOINT_URL else None,
+        )
         self.bucket = settings.S3_BUCKET_NAME
 
     async def save(self, key: str, data: bytes, content_type: str) -> str:

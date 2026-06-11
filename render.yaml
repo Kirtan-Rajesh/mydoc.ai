@@ -1,0 +1,47 @@
+# Render blueprint: free-tier API deployment from this repo.
+# In Render: New + > Blueprint > select this GitHub repo > Apply,
+# then fill the sync:false env vars in the dashboard.
+services:
+  - type: web
+    name: mydoc-api
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: SMS_PROVIDER
+        value: console
+      - key: LLM_PROVIDER
+        value: auto
+      - key: CHAT_MODEL
+        value: gemini-3.1-flash-lite
+      - key: VISION_MODEL
+        value: gemini-3.1-flash-lite
+      - key: EMBED_MODEL
+        value: gemini-embedding-001
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: SECRET_KEY
+        generateValue: true
+      # ---- fill these in the Render dashboard ----
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL          # postgresql+asyncpg://...supabase.com:5432/postgres
+        sync: false
+      - key: DB_SSL
+        value: "true"
+      - key: S3_ENDPOINT_URL       # https://<ref>.supabase.co/storage/v1/s3
+        sync: false
+      - key: S3_BUCKET_NAME        # documents
+        sync: false
+      - key: AWS_REGION            # Supabase storage region, e.g. ap-south-1
+        sync: false
+      - key: AWS_ACCESS_KEY_ID     # Supabase storage S3 access key
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY # Supabase storage S3 secret key
+        sync: false

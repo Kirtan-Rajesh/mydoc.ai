@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     GCS_BUCKET_NAME: str = ""
     S3_BUCKET_NAME: str = ""
     AWS_REGION: str = ""
+    # For S3-compatible providers (Supabase Storage, Cloudflare R2, MinIO):
+    # e.g. https://<project-ref>.supabase.co/storage/v1/s3
+    S3_ENDPOINT_URL: str = ""
 
     # Set true when Postgres requires TLS (e.g. AWS RDS default).
     DB_SSL: bool = False

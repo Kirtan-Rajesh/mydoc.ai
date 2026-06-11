@@ -69,6 +69,15 @@ smoke-tested (health, OTP→JWT auth, /users/me, SSE chat streaming).
 - SMS: no MSG91 yet → SMS_PROVIDER=console in prod too; OTPs visible in App
   Runner logs (documented).
 
+## Session 2 addendum: free-tier deployment chosen
+- User wants $0 hosting → free stack: Render free web service (Docker from
+  GitHub) + Supabase free Postgres + Supabase Storage (S3-compatible, via
+  new S3_ENDPOINT_URL setting) + Gemini free tier. render.yaml blueprint +
+  deploy/free-tier.md guide added. AWS script kept as the paid upgrade path.
+- Code pushed to https://github.com/Kirtan-Rajesh/mydoc.ai (main, 688e7de+).
+- WAITING ON USER: create free Render + Supabase accounts per
+  deploy/free-tier.md (10 min), or provide API keys for me to wire up.
+
 ## Remaining (needs user)
 - Deploy: needs GCP account/credentials (or any Docker host). See deploy/cloud-run.md.
 - Real SMS: set SMS_PROVIDER=msg91 + keys (console mode works for dev).
