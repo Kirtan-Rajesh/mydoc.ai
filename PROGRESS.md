@@ -78,6 +78,35 @@ smoke-tested (health, OTP→JWT auth, /users/me, SSE chat streaming).
 - WAITING ON USER: create free Render + Supabase accounts per
   deploy/free-tier.md (10 min), or provide API keys for me to wire up.
 
+## Session 3 (2026-06-12): Supabase wired + verified; Flutter in VDI
+- User provided Supabase project (ref huhurslugkyeqmcchkei) credentials.
+  CRITICAL NETWORK NOTE: direct DB host db.<ref>.supabase.co is IPv6-only →
+  unreachable from this VDI; use IPv4 session pooler. Project is on
+  **aws-1**-ap-south-1.pooler.supabase.com:5432 (aws-0 says tenant not found).
+  Username postgres.<ref>, password URL-encoded in backend/.env (gitignored).
+- Storage: bucket "documents" exists; S3 endpoint
+  https://<ref>.storage.supabase.co/storage/v1/s3 verified (roundtrip OK).
+  Added S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY settings (pydantic .env doesn't
+  populate os.environ for boto3). render.yaml updated to those var names.
+- FULL E2E VERIFIED on prod stack (local server + Supabase DB + Supabase
+  storage + real Gemini): upload→extraction→RAG chat with source citation.
+  Tables auto-created in Supabase Postgres.
+- Flutter VDI saga (all fixed): SDK was in C:\Program Files (unwritable) →
+  copied to E:\flutter; install contained LINUX dart-sdk → deleted cache,
+  re-downloaded Windows one; C: DRIVE IS 100% FULL → PUB_CACHE + TEMP/TMP
+  must point at E:\flutter-cache\{pub,tmp} for every flutter command
+  (PUB_CACHE persisted as user env var). Missing windows engine artifact
+  const_finder → use --no-tree-shake-icons for builds.
+- Flutter 3.32.2 / Dart 3.8.1. Fixed CardTheme→CardThemeData. flutter analyze:
+  0 issues; widget test passes. No Android SDK/VS in VDI → web build only;
+  APK via GitHub Action.
+- Web app BUILT and SERVED: http://localhost:8200 (python http.server, from
+  frontend-mobile/build/web), pointing at live backend on :8124 (Supabase+
+  Gemini). Dev servers running: uvicorn pid in %TEMP%\mydoc_pid3.txt, web
+  server pid in %TEMP%\mydoc_web_pid.txt.
+- Still pending: Render account/API key for public URL; possible dio SSE
+  streaming limitation on web (chat streams fine on Android/iOS native).
+
 ## Remaining (needs user)
 - Deploy: needs GCP account/credentials (or any Docker host). See deploy/cloud-run.md.
 - Real SMS: set SMS_PROVIDER=msg91 + keys (console mode works for dev).
