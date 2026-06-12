@@ -2,6 +2,8 @@
 via local notifications scheduled from `times`; FCM server push can be added
 later without API changes."""
 
+from datetime import date, datetime, time, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,10 +16,67 @@ from app.schemas import (
     MedicationLogOut,
     MedicationOut,
     MedicationUpdate,
+    TodayDose,
 )
 from app.security import get_current_user
 
 router = APIRouter()
+
+
+@router.get("/today", response_model=list[TodayDose])
+async def todays_doses(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Today's dose schedule across active medications, with taken/skipped
+    status from logs. Times are interpreted in the client's local day; the
+    client passes its own 'today' implicitly by calling at local midnight+."""
+    today = date.today()
+    meds = (
+        await db.execute(
+            select(Medication).where(
+                Medication.user_id == user.id, Medication.is_active.is_(True)
+            )
+        )
+    ).scalars().all()
+    if not meds:
+        return []
+
+    day_start = datetime.combine(today, time.min, tzinfo=timezone.utc)
+    day_end = datetime.combine(today, time.max, tzinfo=timezone.utc)
+    logs = (
+        await db.execute(
+            select(MedicationLog).where(
+                MedicationLog.medication_id.in_([m.id for m in meds]),
+                MedicationLog.scheduled_for >= day_start,
+                MedicationLog.scheduled_for <= day_end,
+            )
+        )
+    ).scalars().all()
+    log_by_key = {(log.medication_id, log.scheduled_for.strftime("%H:%M")): log for log in logs}
+
+    doses: list[TodayDose] = []
+    for med in meds:
+        if med.start_date and med.start_date > today:
+            continue
+        if med.end_date and med.end_date < today:
+            continue
+        for t in sorted(med.times or []):
+            hh, mm = int(t[:2]), int(t[3:5])
+            scheduled = datetime.combine(today, time(hh, mm), tzinfo=timezone.utc)
+            log = log_by_key.get((med.id, t))
+            doses.append(
+                TodayDose(
+                    medication_id=med.id,
+                    medication_name=med.name,
+                    dosage=med.dosage,
+                    time=t,
+                    scheduled_for=scheduled,
+                    status=log.status if log else "pending",
+                )
+            )
+    doses.sort(key=lambda d: d.time)
+    return doses
 
 
 async def _get_owned(db: AsyncSession, user: User, medication_id: str) -> Medication:

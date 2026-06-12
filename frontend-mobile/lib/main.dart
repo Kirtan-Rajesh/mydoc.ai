@@ -5,11 +5,14 @@ import 'api.dart';
 import 'providers.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home_shell.dart';
+import 'services/notifications.dart';
 import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final api = await ApiClient.create();
+  // Fire-and-forget: permission prompt + timezone setup for reminders.
+  ReminderService.instance.init();
   runApp(
     ProviderScope(
       overrides: [apiClientProvider.overrideWithValue(api)],

@@ -107,6 +107,26 @@ smoke-tested (health, OTP→JWT auth, /users/me, SSE chat streaming).
 - Still pending: Render account/API key for public URL; possible dio SSE
   streaming limitation on web (chat streams fine on Android/iOS native).
 
+## Session 4 (2026-06-12): AI-first redesign (user feedback: UI dated, AI must be integrated)
+- Backend: ChatRequest.document_id (attach report → AI analyses in-thread),
+  GET /medications/today (dose checklist w/ statuses), personal-doctor system
+  prompt (meds/diet/lifestyle coaching, follow-ups, red-flag safety). 29 tests.
+- Flutter: full redesign (emerald gradient brand, Material 3, soft shadows).
+  AI-first IA: Today home (greeting/ask-bar/dose-checklist/recent reports),
+  chat with in-thread scan→upload→auto-analysis, records w/ type-colored
+  cards + "Ask AI about this report", meds w/ daily local notifications
+  (flutter_local_notifications + tz; gradle desugaring enabled; manifest
+  receivers added). analyze=0 issues, tests pass, web build OK.
+  Old dashboard_screen.dart deleted; navIndex/chatIntent providers for
+  cross-tab "open chat with attached doc" flow.
+- Website (frontend-web): rebuilt as REAL website — Next.js 14 landing
+  (navbar/hero/features/how/privacy/footer), /login OTP, /app dashboard with
+  sidebar (chat w/ SSE via fetch streams + attach, records w/ detail panel,
+  medicines). Fixed broken stubs (postcss.config.js had tailwind-TS content;
+  tsconfig referenced vitest). `npm run build` clean.
+- RUNNING NOW in VDI: backend :8124, Flutter web :8200, website :3000
+  (pids in %TEMP%\mydoc_pid3/web_pid/next_pid.txt).
+
 ## Remaining (needs user)
 - Deploy: needs GCP account/credentials (or any Docker host). See deploy/cloud-run.md.
 - Real SMS: set SMS_PROVIDER=msg91 + keys (console mode works for dev).

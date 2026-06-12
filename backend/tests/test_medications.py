@@ -66,6 +66,31 @@ async def test_dose_logging(auth_client: AsyncClient):
     assert len(resp.json()) == 1
 
 
+async def test_todays_doses(auth_client: AsyncClient):
+    resp = await auth_client.post(
+        "/api/v1/medications",
+        json={"name": "Telmisartan", "dosage": "40mg", "times": ["08:00", "21:00"]},
+    )
+    med_id = resp.json()["id"]
+
+    resp = await auth_client.get("/api/v1/medications/today")
+    assert resp.status_code == 200
+    doses = [d for d in resp.json() if d["medication_id"] == med_id]
+    assert [d["time"] for d in doses] == ["08:00", "21:00"]
+    assert all(d["status"] == "pending" for d in doses)
+
+    # Mark the morning dose taken -> reflected in /today
+    sched = doses[0]["scheduled_for"]
+    await auth_client.post(
+        f"/api/v1/medications/{med_id}/logs",
+        json={"scheduled_for": sched, "status": "taken"},
+    )
+    resp = await auth_client.get("/api/v1/medications/today")
+    statuses = {d["time"]: d["status"] for d in resp.json() if d["medication_id"] == med_id}
+    assert statuses["08:00"] == "taken"
+    assert statuses["21:00"] == "pending"
+
+
 async def test_subscription_endpoint(auth_client: AsyncClient):
     resp = await auth_client.get("/api/v1/subscriptions/me")
     assert resp.status_code == 200

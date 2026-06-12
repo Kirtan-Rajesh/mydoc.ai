@@ -26,16 +26,22 @@ from app.services.rag import retrieve
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-SYSTEM_PROMPT = """You are MyDoc, a careful health assistant for Indian families. You help users understand their medical documents, lab values, prescriptions, and general health questions.
+SYSTEM_PROMPT = """You are MyDoc — the user's personal AI health companion. You know their health profile, their medical reports, and their medications, and you stay with them for the long term. Act like a warm, attentive family doctor's assistant: proactive, practical, and personal.
 
-Rules:
-- Be clear and use plain language; explain medical terms simply.
-- When document context is provided, ground your answer in it and mention which report you used.
-- Never diagnose or prescribe. For anything concerning, advise consulting a doctor.
-- If asked about an emergency (chest pain, stroke signs, severe bleeding), tell the user to call 112 / go to the nearest emergency room immediately.
+How you help:
+- Explain lab reports and prescriptions in plain language; flag values outside normal ranges and trends across reports when the context shows older results.
+- Help manage medications: what each medicine is for, common side effects to watch, the importance of timing/adherence. Suggest they set reminders in the app.
+- Give practical diet and lifestyle guidance suited to Indian households (vegetarian options, common foods) tailored to their conditions and lab values.
+- Ask one short follow-up question when it would genuinely help you advise better.
+- Be concise: short paragraphs or tight bullet lists, no walls of text.
+
+Safety rules (always):
+- You inform and coach — you never diagnose conditions or prescribe/change medication doses. For those, tell them exactly what to ask their doctor.
+- Red-flag symptoms (chest pain, stroke signs, breathing difficulty, severe bleeding, suicidal thoughts): tell them to call 112 or go to an emergency room NOW, before anything else.
+- If a report is unclear or low quality, say what's missing rather than guessing.
 - Reply in the user's language ({language}).
 
-{profile_block}{context_block}"""
+{profile_block}{attached_block}{context_block}"""
 
 
 def _sse(payload: dict) -> str:
@@ -114,6 +120,42 @@ async def chat(
             parts.append(f"Allergies: {', '.join(profile.allergies)}")
         profile_block = "USER HEALTH PROFILE: " + "; ".join(parts) + "\n\n"
 
+    # Explicitly attached report (e.g. just scanned in chat) gets prime context.
+    attached_block = ""
+    attached_id: str | None = None
+    if body.document_id:
+        from app.models import Document
+
+        doc = (
+            await db.execute(
+                select(Document).where(
+                    Document.id == body.document_id,
+                    Document.user_id == user_id,
+                    Document.is_deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Attached document not found")
+        attached_id = doc.id
+        if doc.status != "ready":
+            attached_block = (
+                f"THE USER JUST ATTACHED A DOCUMENT ({doc.file_name}) that is still being "
+                "processed. Tell them you're reading it and they can ask again in a moment.\n\n"
+            )
+        else:
+            details = [f"file: {doc.file_name}", f"type: {doc.document_type}"]
+            if doc.report_date:
+                details.append(f"date: {doc.report_date}")
+            if doc.structured_data:
+                details.append(f"key values: {json.dumps(doc.structured_data, ensure_ascii=False)}")
+            text_excerpt = (doc.raw_text or doc.summary or "")[:6000]
+            attached_block = (
+                "THE USER ATTACHED THIS REPORT TO THE CURRENT MESSAGE — analyse it first:\n"
+                + "; ".join(details)
+                + f"\ncontent:\n{text_excerpt}\n\n"
+            )
+
     # RAG retrieval over the user's documents.
     try:
         context_chunks = await retrieve(db, user_id, body.message)
@@ -135,8 +177,14 @@ async def chat(
             )
         context_block = "RELEVANT EXTRACTS FROM THE USER'S MEDICAL DOCUMENTS:\n\n" + "\n\n---\n\n".join(blocks)
 
+    if attached_id and attached_id not in source_ids:
+        source_ids.insert(0, attached_id)
+
     system = SYSTEM_PROMPT.format(
-        language=language, profile_block=profile_block, context_block=context_block
+        language=language,
+        profile_block=profile_block,
+        attached_block=attached_block,
+        context_block=context_block,
     )
 
     # Last few turns for conversational continuity.

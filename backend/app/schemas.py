@@ -147,6 +147,16 @@ class MessageOut(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = None  # omit to start a new conversation
+    document_id: str | None = None  # attach a report: its extraction is fed to the AI
+
+
+class TodayDose(BaseModel):
+    medication_id: str
+    medication_name: str
+    dosage: str
+    time: str  # HH:MM
+    scheduled_for: datetime
+    status: str  # pending | taken | skipped
 
 
 # ---------- Medications ----------

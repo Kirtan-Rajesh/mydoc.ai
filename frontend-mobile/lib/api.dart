@@ -186,23 +186,34 @@ class ApiClient {
     }
   }
 
+  /// Upload from a file path (mobile) or raw bytes (web).
   Future<DocumentModel> uploadDocument({
-    required String filePath,
+    String? filePath,
+    List<int>? bytes,
     required String fileName,
     required String mimeType,
   }) async {
     try {
-      final form = FormData.fromMap({
-        'file': await MultipartFile.fromFile(
-          filePath,
-          filename: fileName,
-          contentType: DioMediaType.parse(mimeType),
-        ),
-      });
-      final resp = await _dio.post('/documents', data: form);
+      final file = bytes != null
+          ? MultipartFile.fromBytes(bytes,
+              filename: fileName, contentType: DioMediaType.parse(mimeType))
+          : await MultipartFile.fromFile(filePath!,
+              filename: fileName, contentType: DioMediaType.parse(mimeType));
+      final resp = await _dio.post('/documents', data: FormData.fromMap({'file': file}));
       return DocumentModel.fromJson(resp.data as Map<String, dynamic>);
     } catch (e) {
       throw _wrap(e);
+    }
+  }
+
+  /// Poll until a document leaves the processing states (or timeout).
+  Future<DocumentModel> waitUntilProcessed(String id,
+      {Duration timeout = const Duration(seconds: 90)}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (true) {
+      final doc = await getDocument(id);
+      if (!doc.isProcessing || DateTime.now().isAfter(deadline)) return doc;
+      await Future<void>.delayed(const Duration(seconds: 2));
     }
   }
 
@@ -239,7 +250,9 @@ class ApiClient {
   }
 
   /// Sends a message and yields SSE events as they stream in.
-  Stream<ChatEvent> sendMessage(String message, {String? conversationId}) async* {
+  /// [documentId] attaches a just-uploaded report for the AI to analyse.
+  Stream<ChatEvent> sendMessage(String message,
+      {String? conversationId, String? documentId}) async* {
     Response<ResponseBody> resp;
     try {
       resp = await _dio.post<ResponseBody>(
@@ -247,6 +260,7 @@ class ApiClient {
         data: {
           'message': message,
           if (conversationId != null) 'conversation_id': conversationId,
+          if (documentId != null) 'document_id': documentId,
         },
         options: Options(responseType: ResponseType.stream),
       );
@@ -311,6 +325,17 @@ class ApiClient {
   Future<void> deleteMedication(String id) async {
     try {
       await _dio.delete('/medications/$id');
+    } catch (e) {
+      throw _wrap(e);
+    }
+  }
+
+  Future<List<TodayDose>> getTodayDoses() async {
+    try {
+      final resp = await _dio.get('/medications/today');
+      return (resp.data as List)
+          .map((j) => TodayDose.fromJson(j as Map<String, dynamic>))
+          .toList();
     } catch (e) {
       throw _wrap(e);
     }

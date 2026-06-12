@@ -59,3 +59,28 @@ async def test_chat_unknown_conversation(auth_client: AsyncClient):
 async def test_empty_message_rejected(auth_client: AsyncClient):
     resp = await auth_client.post("/api/v1/chat", json={"message": ""})
     assert resp.status_code == 422
+
+
+async def test_chat_with_attached_document(auth_client: AsyncClient):
+    from .test_documents import PNG_BYTES, _wait_ready
+
+    resp = await auth_client.post(
+        "/api/v1/documents", files={"file": ("scan.png", PNG_BYTES, "image/png")}
+    )
+    doc_id = resp.json()["id"]
+    await _wait_ready(auth_client, doc_id)
+
+    resp = await auth_client.post(
+        "/api/v1/chat", json={"message": "What does this report say?", "document_id": doc_id}
+    )
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    done = [e for e in events if e["type"] == "done"][0]
+    assert doc_id in done["sources"]
+
+
+async def test_chat_with_foreign_document_rejected(auth_client: AsyncClient):
+    resp = await auth_client.post(
+        "/api/v1/chat", json={"message": "analyse", "document_id": "not-a-real-doc"}
+    )
+    assert resp.status_code == 404

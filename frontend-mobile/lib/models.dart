@@ -157,6 +157,33 @@ class Medication {
       );
 }
 
+class TodayDose {
+  final String medicationId;
+  final String medicationName;
+  final String dosage;
+  final String time; // HH:MM
+  final DateTime scheduledFor;
+  final String status; // pending | taken | skipped
+
+  TodayDose({
+    required this.medicationId,
+    required this.medicationName,
+    required this.dosage,
+    required this.time,
+    required this.scheduledFor,
+    required this.status,
+  });
+
+  factory TodayDose.fromJson(Map<String, dynamic> json) => TodayDose(
+        medicationId: json['medication_id'] as String,
+        medicationName: json['medication_name'] as String,
+        dosage: (json['dosage'] as String?) ?? '',
+        time: json['time'] as String,
+        scheduledFor: DateTime.parse(json['scheduled_for'] as String),
+        status: json['status'] as String,
+      );
+}
+
 class FamilyMember {
   final String id;
   final String name;

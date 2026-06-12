@@ -70,3 +70,19 @@ final medicationsProvider = FutureProvider.autoDispose<List<Medication>>(
 final profileProvider = FutureProvider.autoDispose<HealthProfile>(
   (ref) => ref.watch(apiClientProvider).getProfile(),
 );
+
+final todayDosesProvider = FutureProvider.autoDispose<List<TodayDose>>(
+  (ref) => ref.watch(apiClientProvider).getTodayDoses(),
+);
+
+/// Cross-tab request: "open the Ask AI tab, optionally with an attached
+/// report / prefilled question". The shell listens to this.
+class ChatIntent {
+  final String? documentId;
+  final String? prefill;
+
+  const ChatIntent({this.documentId, this.prefill});
+}
+
+final chatIntentProvider = StateProvider<ChatIntent?>((ref) => null);
+final navIndexProvider = StateProvider<int>((ref) => 0);
