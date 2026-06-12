@@ -111,6 +111,8 @@ class S3Storage(Storage):
             "s3",
             region_name=settings.AWS_REGION or None,
             endpoint_url=settings.S3_ENDPOINT_URL or None,
+            aws_access_key_id=settings.S3_ACCESS_KEY_ID or None,
+            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY or None,
             config=Config(s3={"addressing_style": "path"}) if settings.S3_ENDPOINT_URL else None,
         )
         self.bucket = settings.S3_BUCKET_NAME
