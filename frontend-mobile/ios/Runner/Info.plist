@@ -5,7 +5,11 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Mydoc Mobile</string>
+	<string>mydoc.ai</string>
+	<key>NSCameraUsageDescription</key>
+	<string>mydoc.ai uses the camera to scan your medical documents and prescriptions.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>mydoc.ai lets you upload medical documents from your photo library.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
