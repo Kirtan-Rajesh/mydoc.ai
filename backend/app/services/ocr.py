@@ -95,16 +95,19 @@ async def process_document(document_id: str) -> None:
 
             digital_text = _pdf_text(data) if doc.mime_type == "application/pdf" else ""
 
+            # Prepend user note to help the model classify ambiguous files
+            # (e.g. "weight loss progress photo, June 2024")
+            note_hint = f"USER NOTE: {doc.note}\n\n" if doc.note else ""
+            prompt_with_note = note_hint + EXTRACTION_PROMPT
+
             if len(digital_text.strip()) >= MIN_DIGITAL_TEXT_CHARS:
-                # Digital PDF: extract structure from the text (cheaper than vision).
                 raw_out = await llm.complete(
-                    [{"role": "user", "content": f"{EXTRACTION_PROMPT}\n\nDOCUMENT TEXT:\n{digital_text[:30000]}"}]
+                    [{"role": "user", "content": f"{prompt_with_note}\n\nDOCUMENT TEXT:\n{digital_text[:30000]}"}]
                 )
                 extracted = _parse_extraction(raw_out)
                 full_text = digital_text
             else:
-                # Image or scanned PDF: vision extraction.
-                raw_out = await llm.extract_document(data, doc.mime_type, EXTRACTION_PROMPT)
+                raw_out = await llm.extract_document(data, doc.mime_type, prompt_with_note)
                 extracted = _parse_extraction(raw_out)
                 full_text = extracted.get("full_text") or extracted.get("summary") or ""
 

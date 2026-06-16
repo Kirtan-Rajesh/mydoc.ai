@@ -109,6 +109,7 @@ class DocumentOut(BaseModel):
     mime_type: str
     file_size_bytes: int
     status: str
+    note: str | None
     document_type: str | None
     report_date: date | None
     lab_name: str | None
@@ -144,10 +145,17 @@ class MessageOut(BaseModel):
     created_at: datetime
 
 
+class InlineImage(BaseModel):
+    """A symptom photo or body image attached directly in chat (not saved as a document)."""
+    mime_type: str = Field(pattern="^image/(jpeg|png|webp)$")
+    data: str = Field(min_length=4)  # raw base64, no data: prefix
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
-    conversation_id: str | None = None  # omit to start a new conversation
-    document_id: str | None = None  # attach a report: its extraction is fed to the AI
+    conversation_id: str | None = None
+    document_id: str | None = None  # attach a saved document — its extraction is fed to the AI
+    images: list[InlineImage] = Field(default_factory=list)  # inline symptom photos (max 3)
 
 
 class TodayDose(BaseModel):
@@ -227,6 +235,8 @@ class SubscriptionOut(BaseModel):
     status: str
     current_period_end: datetime | None
     limits: dict
+    doc_count: int = 0
+    chat_count_today: int = 0
 
 
 # ---------- Push ----------

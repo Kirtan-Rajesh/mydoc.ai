@@ -106,6 +106,7 @@ class Document(Base):
     # uploaded -> processing -> ready | failed
     status: Mapped[str] = mapped_column(String(20), default="uploaded", index=True)
     error: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)  # user-provided context hint at upload time
     document_type: Mapped[str | None] = mapped_column(String(50), index=True)
     report_date: Mapped[date | None] = mapped_column(Date)
     lab_name: Mapped[str | None] = mapped_column(String(255))

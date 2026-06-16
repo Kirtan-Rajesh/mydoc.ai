@@ -1,9 +1,14 @@
 """AI chat with per-user RAG context, streamed over SSE.
 
 POST /chat returns text/event-stream:
-  data: {"type": "meta", "conversation_id": ...}
-  data: {"type": "token", "content": "..."}   (repeated)
-  data: {"type": "done", "message_id": ..., "sources": [...]}
+  data: {"type": "meta",       "conversation_id": "..."}
+  data: {"type": "status",     "text": "Reviewing your medical history…"}  (agent only)
+  data: {"type": "token",      "content": "..."}                           (repeated)
+  data: {"type": "references", "data": [{title, url}, ...]}               (agent only)
+  data: {"type": "done",       "message_id": "...", "sources": [...]}
+
+Simple document/general queries → fast RAG path (existing behaviour).
+Symptom queries or messages with inline images → full agent pipeline.
 """
 
 import json
@@ -17,16 +22,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import SessionLocal, get_db
-from app.models import Conversation, Message, Profile, Subscription, User
+from app.models import Conversation, Document, Message, Profile, Subscription, User
 from app.schemas import ChatRequest, ConversationOut, MessageOut
 from app.security import get_current_user
+from app.services.agent import run_health_agent
 from app.services.llm import get_llm
 from app.services.rag import retrieve
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-SYSTEM_PROMPT = """You are MyDoc — the user's personal AI health companion. You know their health profile, their medical reports, and their medications, and you stay with them for the long term. Act like a warm, attentive family doctor's assistant: proactive, practical, and personal.
+# ─── Simple RAG system prompt (document/general queries) ─────────────────────
+
+_RAG_SYSTEM = """You are MyDoc — the user's personal AI health companion. You know their health profile, their medical reports, and their medications, and you stay with them for the long term. Act like a warm, attentive family doctor's assistant: proactive, practical, and personal.
 
 How you help:
 - Explain lab reports and prescriptions in plain language; flag values outside normal ranges and trends across reports when the context shows older results.
@@ -38,7 +46,6 @@ How you help:
 Safety rules (always):
 - You inform and coach — you never diagnose conditions or prescribe/change medication doses. For those, tell them exactly what to ask their doctor.
 - Red-flag symptoms (chest pain, stroke signs, breathing difficulty, severe bleeding, suicidal thoughts): tell them to call 112 or go to an emergency room NOW, before anything else.
-- If a report is unclear or low quality, say what's missing rather than guessing.
 - Reply in the user's language ({language}).
 
 {profile_block}{attached_block}{context_block}"""
@@ -54,7 +61,9 @@ async def _check_daily_limit(db: AsyncSession, user: User) -> None:
     ).scalar_one_or_none()
     if sub and sub.plan != "free":
         return
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     count = (
         await db.execute(
             select(func.count(Message.id))
@@ -73,6 +82,8 @@ async def _check_daily_limit(db: AsyncSession, user: User) -> None:
         )
 
 
+# ─── Chat endpoint ────────────────────────────────────────────────────────────
+
 @router.post("")
 async def chat(
     body: ChatRequest,
@@ -81,12 +92,13 @@ async def chat(
 ):
     await _check_daily_limit(db, user)
 
-    # Resolve or create the conversation up front (before streaming starts).
+    # Resolve or create conversation
     if body.conversation_id:
         conv = (
             await db.execute(
                 select(Conversation).where(
-                    Conversation.id == body.conversation_id, Conversation.user_id == user.id
+                    Conversation.id == body.conversation_id,
+                    Conversation.user_id == user.id,
                 )
             )
         ).scalar_one_or_none()
@@ -101,36 +113,18 @@ async def chat(
     db.add(user_msg)
     await db.commit()
 
-    # Snapshot everything the generator needs; it runs after this session closes.
-    conv_id, user_id, language = conv.id, user.id, user.language_pref
+    conv_id = conv.id
+    user_language = user.language_pref or "en"
 
-    profile = (
-        await db.execute(select(Profile).where(Profile.user_id == user_id))
-    ).scalar_one_or_none()
-    profile_block = ""
-    if profile and (profile.medical_conditions or profile.allergies or profile.date_of_birth):
-        parts = []
-        if profile.date_of_birth:
-            parts.append(f"DOB: {profile.date_of_birth}")
-        if profile.gender:
-            parts.append(f"Gender: {profile.gender}")
-        if profile.medical_conditions:
-            parts.append(f"Known conditions: {', '.join(profile.medical_conditions)}")
-        if profile.allergies:
-            parts.append(f"Allergies: {', '.join(profile.allergies)}")
-        profile_block = "USER HEALTH PROFILE: " + "; ".join(parts) + "\n\n"
-
-    # Explicitly attached report (e.g. just scanned in chat) gets prime context.
+    # ── Build attached-document block (same for both paths) ──────────────────
     attached_block = ""
     attached_id: str | None = None
     if body.document_id:
-        from app.models import Document
-
         doc = (
             await db.execute(
                 select(Document).where(
                     Document.id == body.document_id,
-                    Document.user_id == user_id,
+                    Document.user_id == user.id,
                     Document.is_deleted.is_(False),
                 )
             )
@@ -141,7 +135,7 @@ async def chat(
         if doc.status != "ready":
             attached_block = (
                 f"THE USER JUST ATTACHED A DOCUMENT ({doc.file_name}) that is still being "
-                "processed. Tell them you're reading it and they can ask again in a moment.\n\n"
+                "processed. Tell them you're reading it and to ask again in a moment.\n\n"
             )
         else:
             details = [f"file: {doc.file_name}", f"type: {doc.document_type}"]
@@ -151,84 +145,158 @@ async def chat(
                 details.append(f"key values: {json.dumps(doc.structured_data, ensure_ascii=False)}")
             text_excerpt = (doc.raw_text or doc.summary or "")[:6000]
             attached_block = (
-                "THE USER ATTACHED THIS REPORT TO THE CURRENT MESSAGE — analyse it first:\n"
+                "THE USER ATTACHED THIS REPORT — analyse it first:\n"
                 + "; ".join(details)
                 + f"\ncontent:\n{text_excerpt}\n\n"
             )
 
-    # RAG retrieval over the user's documents.
-    try:
-        context_chunks = await retrieve(db, user_id, body.message)
-    except Exception:
-        logger.exception("RAG retrieval failed; continuing without context")
-        context_chunks = []
+    # Prepare inline images for agent
+    inline_images = [{"mime_type": img.mime_type, "data": img.data} for img in body.images[:3]]
 
-    context_block = ""
-    source_ids: list[str] = []
-    if context_chunks:
-        seen = set()
-        blocks = []
-        for c in context_chunks:
-            if c["document_id"] not in seen:
-                seen.add(c["document_id"])
-                source_ids.append(c["document_id"])
-            blocks.append(
-                f"[{c['file_name']}" + (f", {c['report_date']}" if c["report_date"] else "") + f"]\n{c['text']}"
-            )
-        context_block = "RELEVANT EXTRACTS FROM THE USER'S MEDICAL DOCUMENTS:\n\n" + "\n\n---\n\n".join(blocks)
+    # ── Decide which path to take ────────────────────────────────────────────
+    # Agent path: inline images always; or we detect symptom intent quickly.
+    # Fast detection: the agent classifier runs inside run_health_agent, so we
+    # trigger agent whenever images are present. For text-only, the agent also
+    # handles routing internally and falls through to RAG for doc questions.
+    use_agent = bool(inline_images) or not body.document_id
 
-    if attached_id and attached_id not in source_ids:
-        source_ids.insert(0, attached_id)
+    if use_agent:
+        # ── Agent pipeline ───────────────────────────────────────────────────
+        async def agent_stream():
+            yield _sse({"type": "meta", "conversation_id": conv_id})
+            full: list[str] = []
+            source_ids: list[str] = []
+            intent = "general"
 
-    system = SYSTEM_PROMPT.format(
-        language=language,
-        profile_block=profile_block,
-        attached_block=attached_block,
-        context_block=context_block,
-    )
+            async for event in run_health_agent(
+                message=body.message,
+                user=user,
+                images=inline_images,
+                attached_doc_block=attached_block,
+                db=db,
+            ):
+                # Pass through all events; capture agent_done for DB save
+                data = json.loads(event[len("data: "):].rstrip())
+                if data["type"] == "agent_done":
+                    full = [data.get("full_text", "")]
+                    source_ids = data.get("sources", [])
+                    intent = data.get("intent", "general")
+                    if attached_id and attached_id not in source_ids:
+                        source_ids.insert(0, attached_id)
+                    # Don't forward agent_done; we emit "done" below instead
+                else:
+                    yield event
 
-    # Last few turns for conversational continuity.
-    history_rows = (
-        await db.execute(
-            select(Message)
-            .where(Message.conversation_id == conv_id)
-            .order_by(Message.created_at.desc())
-            .limit(12)
+            async with SessionLocal() as save_db:
+                msg = Message(
+                    conversation_id=conv_id,
+                    role="assistant",
+                    content="".join(full),
+                    sources=source_ids or None,
+                )
+                save_db.add(msg)
+                await save_db.commit()
+                yield _sse({"type": "done", "message_id": msg.id, "sources": source_ids})
+
+        return StreamingResponse(
+            agent_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
-    ).scalars().all()
-    history = [{"role": m.role, "content": m.content} for m in reversed(history_rows)]
 
-    async def stream():
-        yield _sse({"type": "meta", "conversation_id": conv_id})
-        full: list[str] = []
+    else:
+        # ── Fast RAG path (explicit document attachment, no inline images) ───
+        profile = (
+            await db.execute(select(Profile).where(Profile.user_id == user.id))
+        ).scalar_one_or_none()
+        profile_block = ""
+        if profile and (profile.medical_conditions or profile.allergies or profile.date_of_birth):
+            pf = []
+            if profile.date_of_birth:
+                pf.append(f"DOB: {profile.date_of_birth}")
+            if profile.gender:
+                pf.append(f"Gender: {profile.gender}")
+            if profile.medical_conditions:
+                pf.append(f"Conditions: {', '.join(profile.medical_conditions)}")
+            if profile.allergies:
+                pf.append(f"Allergies: {', '.join(profile.allergies)}")
+            profile_block = "USER HEALTH PROFILE: " + "; ".join(pf) + "\n\n"
+
         try:
-            async for token in get_llm().chat_stream(history, system):
-                full.append(token)
-                yield _sse({"type": "token", "content": token})
+            context_chunks = await retrieve(db, user.id, body.message)
         except Exception:
-            logger.exception("LLM stream failed")
-            fallback = "Sorry, I ran into a problem answering that. Please try again."
-            full = [fallback]
-            yield _sse({"type": "token", "content": fallback})
+            logger.exception("RAG retrieval failed")
+            context_chunks = []
 
-        # Persist the assistant message with a fresh session (request session is closed).
-        async with SessionLocal() as save_db:
-            msg = Message(
-                conversation_id=conv_id,
-                role="assistant",
-                content="".join(full),
-                sources=source_ids or None,
+        context_block = ""
+        source_ids: list[str] = [attached_id] if attached_id else []
+        if context_chunks:
+            seen: set[str] = set()
+            blocks: list[str] = []
+            for c in context_chunks:
+                if c["document_id"] not in seen:
+                    seen.add(c["document_id"])
+                    if c["document_id"] not in source_ids:
+                        source_ids.append(c["document_id"])
+                blocks.append(
+                    f"[{c['file_name']}"
+                    + (f", {c['report_date']}" if c["report_date"] else "")
+                    + f"]\n{c['text']}"
+                )
+            context_block = (
+                "RELEVANT EXTRACTS FROM THE USER'S MEDICAL DOCUMENTS:\n\n"
+                + "\n\n---\n\n".join(blocks)
             )
-            save_db.add(msg)
-            await save_db.commit()
-            yield _sse({"type": "done", "message_id": msg.id, "sources": source_ids})
 
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+        system = _RAG_SYSTEM.format(
+            language=user_language,
+            profile_block=profile_block,
+            attached_block=attached_block,
+            context_block=context_block,
+        )
 
+        history_rows = (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv_id)
+                .order_by(Message.created_at.desc())
+                .limit(12)
+            )
+        ).scalars().all()
+        history = [{"role": m.role, "content": m.content} for m in reversed(history_rows)]
+
+        async def rag_stream():
+            yield _sse({"type": "meta", "conversation_id": conv_id})
+            full: list[str] = []
+            try:
+                async for token in get_llm().chat_stream(history, system):
+                    full.append(token)
+                    yield _sse({"type": "token", "content": token})
+            except Exception:
+                logger.exception("LLM stream failed")
+                fallback = "Sorry, I ran into a problem. Please try again."
+                full = [fallback]
+                yield _sse({"type": "token", "content": fallback})
+
+            async with SessionLocal() as save_db:
+                msg = Message(
+                    conversation_id=conv_id,
+                    role="assistant",
+                    content="".join(full),
+                    sources=source_ids or None,
+                )
+                save_db.add(msg)
+                await save_db.commit()
+                yield _sse({"type": "done", "message_id": msg.id, "sources": source_ids})
+
+        return StreamingResponse(
+            rag_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+
+# ─── Conversation endpoints ───────────────────────────────────────────────────
 
 @router.get("/conversations", response_model=list[ConversationOut])
 async def list_conversations(
@@ -254,13 +322,16 @@ async def get_messages(
     conv = (
         await db.execute(
             select(Conversation).where(
-                Conversation.id == conversation_id, Conversation.user_id == user.id
+                Conversation.id == conversation_id,
+                Conversation.user_id == user.id,
             )
         )
     ).scalar_one_or_none()
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = await db.execute(
-        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at)
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at)
     )
     return rows.scalars().all()

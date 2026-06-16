@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_CHARS: int = 200
     RAG_TOP_K: int = 6
 
+    # Web search (Tavily — https://tavily.com, free tier: 1 000 searches/month)
+    TAVILY_API_KEY: str = ""
+    WEB_SEARCH_ENABLED: bool = True  # set False to disable even when key is present
+
     # Observability
     SENTRY_DSN: str = ""
 

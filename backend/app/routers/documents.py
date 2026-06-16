@@ -50,6 +50,7 @@ async def upload_document(
     background: BackgroundTasks,
     file: UploadFile = File(...),
     member_id: str | None = Form(default=None),
+    note: str | None = Form(default=None, max_length=500),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -85,6 +86,7 @@ async def upload_document(
     doc = Document(
         user_id=user.id,
         member_id=member_id,
+        note=note,
         file_name=file.filename or "document",
         mime_type=file.content_type,
         file_size_bytes=len(data),

@@ -6,13 +6,15 @@ clients can build against it. The webhook endpoint is stubbed and safe.
 
 import logging
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
-from app.models import Subscription, User
+from app.models import Conversation, Document, Message, Subscription, User
 from app.schemas import SubscriptionOut
 from app.security import get_current_user
 
@@ -43,11 +45,35 @@ async def my_subscription(
     if sub.plan == "free":
         limits["documents"] = settings.FREE_PLAN_DOC_LIMIT
         limits["daily_chats"] = settings.FREE_PLAN_DAILY_CHAT_LIMIT
+
+    doc_count = (
+        await db.execute(
+            select(func.count()).select_from(Document).where(
+                Document.user_id == user.id, Document.is_deleted.is_(False)
+            )
+        )
+    ).scalar_one()
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    chat_count_today = (
+        await db.execute(
+            select(func.count()).select_from(Message).join(
+                Conversation, Message.conversation_id == Conversation.id
+            ).where(
+                Conversation.user_id == user.id,
+                Message.role == "user",
+                Message.created_at >= today_start,
+            )
+        )
+    ).scalar_one()
+
     return SubscriptionOut(
         plan=sub.plan,
         status=sub.status,
         current_period_end=sub.current_period_end,
         limits=limits,
+        doc_count=doc_count,
+        chat_count_today=chat_count_today,
     )
 
 

@@ -5,11 +5,13 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
 import {
+  Crown,
   FileText,
   HeartPulse,
   LogOut,
   MessageCircle,
   Pill,
+  User,
 } from 'lucide-react'
 import { getMe, getToken, setToken, type UserOut } from '@/lib/api'
 
@@ -17,6 +19,8 @@ const nav = [
   { href: '/app/chat', label: 'Ask AI', icon: MessageCircle },
   { href: '/app/records', label: 'Records', icon: FileText },
   { href: '/app/medications', label: 'Medicines', icon: Pill },
+  { href: '/app/profile', label: 'Profile', icon: User },
+  { href: '/app/subscriptions', label: 'Subscription', icon: Crown },
 ]
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

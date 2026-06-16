@@ -112,6 +112,47 @@ export const getConversations = () => request<ConversationOut[]>('/chat/conversa
 export const getMessages = (id: string) =>
   request<MessageOut[]>(`/chat/conversations/${id}/messages`)
 
+// ---- Profile ----
+export interface HealthProfile {
+  dob: string | null
+  gender: string | null
+  blood_group: string | null
+  height_cm: number | null
+  weight_kg: number | null
+  medical_conditions: string[]
+  allergies: string[]
+}
+
+export interface FamilyMember {
+  id: string
+  name: string
+  relation: string
+  phone: string | null
+}
+
+export const getProfile = () => request<HealthProfile>('/users/me/profile')
+export const updateProfile = (body: Partial<HealthProfile>) =>
+  request<HealthProfile>('/users/me/profile', { method: 'PUT', body: JSON.stringify(body) })
+export const updateMe = (body: { name?: string; language_pref?: string }) =>
+  request<UserOut>('/users/me', { method: 'PATCH', body: JSON.stringify(body) })
+export const getFamily = () => request<FamilyMember[]>('/users/me/family')
+export const addFamilyMember = (body: { name: string; relation: string; phone?: string }) =>
+  request<FamilyMember>('/users/me/family', { method: 'POST', body: JSON.stringify(body) })
+export const deleteFamilyMember = (id: string) =>
+  request<void>(`/users/me/family/${id}`, { method: 'DELETE' })
+
+// ---- Subscriptions ----
+export interface SubscriptionOut {
+  plan: 'free' | 'pro' | 'family'
+  status: string
+  current_period_end: string | null
+  limits: { documents: number; daily_chats: number; family_members: number }
+  doc_count: number
+  chat_count_today: number
+}
+
+export const getSubscription = () => request<SubscriptionOut>('/subscriptions/me')
+
 export async function uploadDocument(file: File): Promise<DocumentOut> {
   const form = new FormData()
   form.append('file', file)
